@@ -2,9 +2,12 @@ from flask import jsonify, abort, make_response, request
 from app_package import app
 from app_package import functions
 import jwt
+import yaml
+from ssh_manager import utilities
+import os
 import datetime
 from functools import wraps
-
+from ssh_manager.ssh_class import SshClass
 app.config['SECRET_KEY'] = "thisisthesecretkey"
 
 
@@ -150,3 +153,58 @@ def logout():
         return jsonify({'message': 'Logout Successfully'})
     else:
         return jsonify({'message': 'Logout Failed'})
+
+
+@app.route('/ssh/connect', methods=['POST'])
+# @login_required
+def connect():
+    """
+    Connect with the device having IP address as provided by using the Username and Password parameter
+    :param: This function take 3 argument as POST request i-e Username, Address, Password
+    :return: Message1 = Connection build successfully
+             Message2 = Server side coneection error
+             Message3 = SSH connection failed
+    """
+    credentials = {
+        'Username': request.json['username'],
+        'Address': request.json['address'],
+        'Password': request.json['password']
+    }
+    device = SshClass()
+    connected = device.connect(credentials)
+    if connected:
+        device_credentials = [{credentials['Address']: [credentials['Username'], credentials['Password']]}]
+        utilities.delete_known_old_credentials(credentials['Address'])
+        with open(r'./ssh_manager/store_connection.yaml', "a") as file:
+            documents = yaml.dump(device_credentials, file)
+        disconnected = device.disconnect()
+        if disconnected:
+            return jsonify({'message': 'SSH connection build successfully successfully'})
+        else:
+            return jsonify({'Message': 'Server side error while building the connection'})
+    else:
+        return jsonify({'message': 'Device ssh connection  Failed'})
+
+@app.route('/ssh/command', methods=['POST'])
+def command():
+    """
+    :param: it takes 2 argument i-e IP and command
+    :return: Message1 = result of the command
+             Message2 = Device not connected yet to run the command
+    """
+    ip_address = request.json['address']
+    command_to_run = request.json['command']
+    credentials = utilities.credential_of_device(ip_address)
+    if credentials is not None:
+        device = SshClass()
+        device.connect(credentials)
+        result = device.run_command(command_to_run)
+        return result
+    else:
+        return jsonify({'Message': 'Device not connected yet first connect with device by using /ssh/connect api'})
+
+@app.route('/ssh/close',methods=['POST'])
+def close_ssh():
+    ip_address = request.json['address']
+    utilities.delete_known_old_credentials(ip_address)
+    return jsonify({'Message':"Connection closed Successfully"})
