@@ -27,3 +27,21 @@ class User(db.Model):
             "Login": self.Login,
             "Id": self.id        # delete
         }
+
+
+class Device(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    User = db.Column(db.String(200), nullable=False)
+    Username = db.Column(db.String(200), nullable=False, unique=True)
+    Password = db.Column(db.String(200), nullable=False)
+    Address = db.Column(db.String(64), nullable=False, unique=True)
+
+    def __repr__(self):
+        return '<Username {}>'.format(self.Username)
+
+    def information(self):
+        return {
+            "Username": self.Username,
+            "Password": self.Password,
+            "Address": self.Address
+        }

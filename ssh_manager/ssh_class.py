@@ -8,13 +8,13 @@ class SshClass:
         self.command = None
         self.username = None
         self.password = None
-        self.result = ""        # Not used
+        self.result = ""  # Not used
 
-    def connect(self,credentials):
+    def connect(self, credentials):
         """
-        :param username: Username of the device which you want to ssh/connect
-        :param ip_address: IP address of the device which you want to ssh/connect
-        :param password: Password of the device which you want to ssh/connect
+        :param: username: Username of the device which you want to ssh/connect
+        :param: ip_address: IP address of the device which you want to ssh/connect
+        :param: password: Password of the device which you want to ssh/connect
         :return: True / False
         """
         self.username = credentials['Username']
@@ -28,14 +28,12 @@ class SshClass:
             self.client = client
             return True
         except:
-            # return json.loads(json.dumps({'message': 'Connection not established'})), 403
-            print("Connection not build successfully")
             return False
 
     def run_command(self, command):
         """
-        :param command: command that you run on the device which you have sshed and already connected by using connect funtion
-        :return:
+        :param: command: command that you run on the device which you have sshed and already connected by using connect function
+        :return: result of the command or message
         """
         if self.client is None:
             print("First Build the connection by using connect function")
@@ -46,7 +44,7 @@ class SshClass:
                 # result
                 r_out, r_err = ss_stdout.readlines(), ss_stderr.read()  # ss_stderr for error and ss_stdout for
                 # result of command
-                result = ""     # to save result of the command
+                result = ""  # to save result of the command
                 if len(r_err) > 5:
                     result = r_err.decode("utf-8")
                 else:
@@ -54,7 +52,6 @@ class SshClass:
                         result = str(result) + str(line)
                 # self.client.close()  # closing connection
             except IOError:  # if host/server is not up or for any other issue
-                print("host is not up")
                 return "host not up", 500
             return result
 
