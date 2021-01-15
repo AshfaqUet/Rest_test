@@ -3,7 +3,6 @@ from ssh_manager import utilities
 from app_package import app
 from app_package import functions
 import jwt
-import yaml
 import datetime
 from functools import wraps
 from ssh_manager.ssh_class import SshClass
@@ -40,7 +39,7 @@ def login_required(f):
 
 
 # Register the new user
-@app.route('/user/register', methods=['POST'])  # Registration
+@app.route('/users', methods=['POST'])  # Registration
 def register_user():
     """ Register new user
         params: we take user information in the POST request from the user
@@ -56,12 +55,15 @@ def register_user():
         'Email': request.json['email'],
         'Password': request.json['password']
     }
-    functions.registration(user)
-    return jsonify({'User': user}), 201
+    registered = functions.registration(user)
+    if registered:
+        return jsonify({'User': user}), 201
+    else:
+        return jsonify({"Message": "User already registered"})
 
 
 # Login the registered user
-@app.route('/user/login', methods=['POST'])  # Login
+@app.route('/users/login', methods=['POST'])  # Login
 def login_user():
     """ Login the user
         params: Get (Username, Password) in the POST request
@@ -74,7 +76,7 @@ def login_user():
     permit = functions.login(user)
     if permit:
         token = jwt.encode({"Username": user['Username'], "Password": user['Password'],
-                            "exp": datetime.datetime.utcnow() + datetime.timedelta(minutes=30)},
+                            "exp": datetime.datetime.utcnow() + datetime.timedelta(minutes=60)},
                            app.config['SECRET_KEY'], algorithm='HS256')
         return jsonify({'Token': token.decode('UTF-8')})
     else:
@@ -82,7 +84,7 @@ def login_user():
 
 
 # Delete the logined user
-@app.route('/user', methods=['DELETE'])  # Delete User Account
+@app.route('/users', methods=['DELETE'])  # Delete User Account
 @login_required
 def delete_user():
     """ Delete the existing user
@@ -112,17 +114,31 @@ def get_users():
 
 
 # Get a single User
-@app.route('/user', methods=['GET'])  # Get a single user data
+@app.route('/users/<string:username>', methods=['GET'])  # Get a single user data
 @login_required
-def get_user():
+def get_user(username):
     """ Getting own information
         params : Valid token Token for authorization purpose
         return : User all information (Username, Password, Email, Login etc)
     """
     token = request.args.get('token')
     data = jwt.decode(token, app.config['SECRET_KEY'])
-    user = functions.get_user(data)
-    return user
+    if (username[0] == "\"" and username[-1] == "\"") or (username[0] == "\'" and username[-1] == "\'"):  # handling "1.2.3.4" should be equal to 1.2.3.4 for further process
+        username = username[1:-1]
+    print(data["Username"])
+    if data['Username'] == username:
+        user = functions.get_user(data)
+        all_devices = utilities.get_devices(user['Username'])
+        if all_devices:  # If user have some devices
+            result = dict()
+            for index, device in enumerate(all_devices):
+                result[f'Device {index + 1}'] = device.to_json()
+                user["User Devices "]= result
+        else:  # if user have no device in db
+            user["User Devices "] = "No Devices Yet"
+        return user
+    else:
+        return jsonify({"Message":"Username and login user Not matched"})
 
 
 # Logout the Logined user
@@ -154,63 +170,80 @@ def logout():
 """
 
 
-@app.route('/device/<string:ip_addr>/credential', methods=["GET"])  # get credential of device having this ip
-# @login_required
-def get_credential(ip_addr):
-    if (ip_addr[0] == "\"" and ip_addr[-1] == "\"") or (ip_addr[0] == "\'" and ip_addr[-1] == "\'"):  # handling "1.2.3.4" should be equal to 1.2.3.4 for further process
-        ip_addr = ip_addr[1:-1]
-    credentials = utilities.get_device_credential(ip_addr)
+@app.route('/devices', methods=["GET"])  # get credential of device having this ip
+@login_required
+def get_devices():
+    token = request.args.get('token')
+    data = jwt.decode(token, app.config['SECRET_KEY'])
+    user = functions.get_user(data)
+    all_devices = utilities.get_devices(user['Username'])
+    if all_devices:         # If user have some devices
+        result = dict()
+        for index, device in enumerate(all_devices):
+            result[f'Device {index+1}'] = device.to_json()
+        return jsonify({"Devices ": result})
+    else:                   # if user have no device in db
+        return jsonify({"Message": "NO DEVICE SAVED"})
+
+
+@app.route('/devices/<string:device_id>', methods=["GET"])  # get credential of device having this ip
+@login_required
+def get_device(device_id):
+    if (device_id[0] == "\"" and device_id[-1] == "\"") or (device_id[0] == "\'" and device_id[-1] == "\'"):  # handling "1.2.3.4" should be equal to 1.2.3.4 for further process
+        device_id = device_id[1:-1]
+    credentials = utilities.get_device_credential(device_id)
     if credentials is not None:
         return credentials
     else:
-        return jsonify({"Message": "Unknown device"})
+        return jsonify({"Message": "No device saved with this id"})
 
 
-@app.route('/device/<string:ip_addr>/credential', methods=["POST"])  # save credential of device having this ip
-# @login_required
-def post_credential(ip_addr):
+@app.route('/devices', methods=["POST"])  # save credential of device having this ip
+@login_required
+def post_credential():
     """
     This function get ip from url and credential as a post method. verify the credential if the credential are connect
     save the credential in yaml file else return message to the user
-    :param ip_addr: IP for which you want to store ssh credential
+    :param id: IP for which you want to store ssh credential
     :return: message
     """
-    if (ip_addr[0] == "\"" and ip_addr[-1] == "\"") or (ip_addr[0] == "\'" and ip_addr[-1] == "\'"):  # handling "1.2.3.4" should be equal to 1.2.3.4 for further process
-        ip_addr = ip_addr[1:-1]
+    token = request.args.get('token')
+    data = jwt.decode(token, app.config['SECRET_KEY'])
+
     credentials = {
         'Username': request.json['username'],
-        'Address': ip_addr,
-        'Password': request.json['password']
+        'Address': request.json['address'],
+        'Password': request.json['password'],
+        'User': data['Username']
     }
     device = SshClass()
     connected = device.connect(credentials)
     if connected:
-        utilities.delete_device(credentials['Address'])
         device_saved = utilities.save_device_credential(credentials)
         if device_saved is True:
             return jsonify({'Message': 'Device credential saved successfully'})
         else:
-            return jsonify({'Message': 'Device credential not saved successfully'})
+            return jsonify({'Message': 'This device is already registered'})
 
     else:
         return jsonify({'Message': 'Please double check your credentials'})
 
 
-@app.route('/device/<string:ip_addr>/credential', methods=["DELETE"])  # delete the credential of the device
-# @login_required
-def delete_credential(ip_addr):
+@app.route('/devices/<string:device_id>', methods=["DELETE"])  # delete the credential of the device
+@login_required
+def delete_credential(device_id):
     """
     Delete the credential from the yaml file against the providing ip
-    :param ip_addr: delete credential of this ip
+    :param device_id: delete credential of this ip
     :return: message
     """
-    if (ip_addr[0] == "\"" and ip_addr[-1] == "\"") or (ip_addr[0] == "\'" and ip_addr[-1] == "\'"):  # handling "1.2.3.4" should be equal to 1.2.3.4 for further process
-        ip_addr = ip_addr[1:-1]
-    device_deleted = utilities.delete_device(ip_addr)
+    if (device_id[0] == "\"" and device_id[-1] == "\"") or (device_id[0] == "\'" and device_id[-1] == "\'"):  # handling "1.2.3.4" should be equal to 1.2.3.4 for further process
+        device_id = device_id[1:-1]
+    device_deleted = utilities.delete_device(device_id)
     if device_deleted:
         return jsonify({'Message': "Credential deleted Successfully"})
     else:
-        return jsonify({'Message': "Unknown device"})
+        return jsonify({'Message': "No device saved with this id"})
 
 
 
@@ -226,9 +259,9 @@ def delete_credential(ip_addr):
 """
 
 
-@app.route('/device/<string:ip_addr>/ssh', methods=['POST'])  # run ssh command on device having following ip
-# @login_required
-def run_command(ip_addr):
+@app.route('/devices/<string:device_id>/ssh', methods=['GET'])  # run ssh command on device having following ip
+@login_required
+def run_command(device_id):
     """
     This function first check the credential if the credential is correct, ssh the device and run the command
     but if credentials are wrong, return a message that credential are wrong
@@ -237,12 +270,12 @@ def run_command(ip_addr):
              Message2 = Wrong credentials
     """
     command_to_run = request.args.get('command')
-    if (ip_addr[0] == "\"" and ip_addr[-1] == "\"") or (ip_addr[0] == "\'" and ip_addr[-1] == "\'"):  # handling "1.2.3.4" should be equal to 1.2.3.4 for further process
-        ip_addr = ip_addr[1:-1]
-    credentials = utilities.get_device_credential(ip_addr)
+    if (device_id[0] == "\"" and device_id[-1] == "\"") or (device_id[0] == "\'" and device_id[-1] == "\'"):  # handling "1.2.3.4" should be equal to 1.2.3.4 for further process
+        device_id = device_id[1:-1]
+    credentials = utilities.get_device_credential(device_id)
     if credentials is None:
         return jsonify({"Message": "Unknown Device"})
-    credentials["Command"]= command_to_run
+    credentials["Command"] = command_to_run
     device = SshClass()
     connected = device.connect(credentials)
     if connected:

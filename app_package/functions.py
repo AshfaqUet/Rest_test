@@ -13,9 +13,9 @@ def registration(user):
     try:
         db.session.add(new_user)
         db.session.commit()
+        return True
     except:  # ########################### Unique Constraint breaks ##################################
-        print("This user already registered")
-        abort(400)
+        return False
 
 
 def users():
